@@ -1,67 +1,85 @@
-extern crate scoped_threadpool;
+extern crate minifb;
 extern crate rand;
 extern crate raqote;
-extern crate minifb;
+extern crate scoped_threadpool;
 
-pub mod table;
 pub mod gen;
+pub mod table;
+pub mod voxel;
 
-use table::Table;
+use minifb::{MouseMode, Scale, ScaleMode, Window, WindowOptions};
 use raqote::*;
-use minifb::{MouseMode, Window, WindowOptions, ScaleMode, Scale};
+use table::Table;
+use voxel::VoxelGrid;
+use std::time::Instant;
 
 pub type Prec = f32;
 
-const N_ELEMS: usize = 25000;
+const N_ELEMS: usize = 100000;
 const N_THREADS: u32 = 16;
-const G: Prec = 20.0;
-const DT: Prec = 0.02;
-const BOUNCE_DIST: Prec = 10.0;
-const BOUNCE_COEFF: Prec = 0.025;
+const GRID_SCALE: Prec = 100.0;
+const PRECISION_RADIUS: Prec = 150.0;
+const PRECISION_RADIUS_SQUARED: Prec = PRECISION_RADIUS * PRECISION_RADIUS;
+const G: Prec = 40.0;
+const DT: Prec = 0.01;
+const BOUNCE_DIST: Prec = 5.0;
+const BOUNCE_COEFF: Prec = 0.2;
 
 const STEPS_PER_FRAME: usize = 10;
 
-const RADIUS: Prec = 1000.0;
+const RADIUS: Prec = 1250.0;
 const RANDOM_SPEED: Prec = 5.0;
-const TANGENT_SPEED: Prec = BLACK_HOLE_MASS * G;
-const BLACK_HOLE_MASS: Prec = 100000.0;
+const BLACK_HOLE_MASS: Prec = 500000.0;
 const Z_SCALE: Prec = 0.3;
 
-const NORM_MULT: Prec = 0.001;
+// const NORM_MULT: Prec = 0.001;
 const WIDTH: usize = 1920;
 const HEIGHT: usize = 1080;
-const MIN_X: Prec = -1000.0 * WIDTH as Prec / HEIGHT as Prec;
-const MAX_X: Prec = 1000.0 * WIDTH as Prec / HEIGHT as Prec;
-const MIN_Y: Prec = -1000.0;
-const MAX_Y: Prec = 1000.0;
+const SCALE: Prec = 1000.0;
+const MIN_X: Prec = -SCALE * WIDTH as Prec / HEIGHT as Prec;
+const MAX_X: Prec = SCALE * WIDTH as Prec / HEIGHT as Prec;
+const MIN_Y: Prec = -SCALE;
+const MAX_Y: Prec = SCALE;
 
 fn main() {
     let mut position = gen::uniform(RADIUS, N_ELEMS);
     position.foreach(|_, p, _| (p.0, p.1, p.2 * Z_SCALE));
-    let mut mass = gen::scalar_uniform(0.5, 1.0, N_ELEMS);
+    let mut mass = gen::scalar_uniform(0.5, 1.5, N_ELEMS);
     let mut speed = gen::uniform(RANDOM_SPEED, N_ELEMS);
     speed.foreach(|i, s, _| {
         let p = position.get(i).unwrap();
         let n = Prec::sqrt(p.0 * p.0 + p.1 * p.1);
         let alpha = Prec::atan2(p.1 / n, p.0 / n);
-        let distance_sqrt = Prec::sqrt(Prec::sqrt(distance_squared(*p, (0.0, 0.0, 0.0))));
+        let distance = Prec::sqrt(distance_squared(*p, (0.0, 0.0, 0.0)));
+        let distance_sqrt = Prec::sqrt(distance);
         (
-            s.0 - Prec::sqrt(TANGENT_SPEED) * Prec::sin(alpha) / distance_sqrt,
-            s.1 + Prec::sqrt(TANGENT_SPEED) * Prec::cos(alpha) / distance_sqrt,
-            s.2
+            s.0 - Prec::sqrt(BLACK_HOLE_MASS * G + distance / RADIUS * N_ELEMS as Prec) * Prec::sin(alpha) / distance_sqrt,
+            s.1 + Prec::sqrt(BLACK_HOLE_MASS * G + distance / RADIUS * N_ELEMS as Prec) * Prec::cos(alpha) / distance_sqrt,
+            s.2,
         )
     });
-    let mut accel = gen::null(N_ELEMS);
+    let mut accel_close = gen::null(N_ELEMS);
+    let mut accel_far = gen::null(N_ELEMS);
 
     position.array.push((0.0, 0.0, 0.0));
     mass.array.push(BLACK_HOLE_MASS);
     speed.array.push((0.0, 0.0, 0.0));
-    accel.array.push((0.0, 0.0, 0.0));
+    accel_close.array.push((0.0, 0.0, 0.0));
+    accel_far.array.push((0.0, 0.0, 0.0));
 
-    let mut window = Window::new("Galaxy goes brr", WIDTH, HEIGHT, WindowOptions {
-        ..WindowOptions::default()
-    }).unwrap();
+    let mut voxels = VoxelGrid::new(GRID_SCALE);
+    voxels.populate(&position);
+    voxels.update(&position, &speed, &mass);
 
+    let mut window = Window::new(
+        "Galaxy goes brr",
+        WIDTH,
+        HEIGHT,
+        WindowOptions {
+            ..WindowOptions::default()
+        },
+    )
+    .unwrap();
 
     let mut dt = DrawTarget::new(WIDTH as i32, HEIGHT as i32);
 
@@ -71,37 +89,83 @@ fn main() {
         pb.rect(0.0, 0.0, WIDTH as f32, HEIGHT as f32);
         dt.fill(
             &pb.finish(),
-            &Source::Solid(SolidSource::from_unpremultiplied_argb(0xff, 0x00, 0x00, 0x00)),
-            &DrawOptions::new()
+            &Source::Solid(SolidSource::from_unpremultiplied_argb(
+                0xff, 0x00, 0x00, 0x00,
+            )),
+            &DrawOptions::new(),
         );
     }
 
     let mut step = 0;
 
     loop {
+        let start = Instant::now();
         step += 1;
         // Advance N step
-        for _ in 0..STEPS_PER_FRAME {
-            accel.foreach_threaded(N_THREADS, |i, _, _| {
-                let my_position = position.get(i).unwrap();
-                let mut res = (0.0, 0.0, 0.0);
-                for (index, position) in position.iter().enumerate() {
-                    if index == i {
-                        continue
-                    }
-                    let mut distance_squared = distance_squared(*my_position, *position);
-                    if distance_squared < BOUNCE_DIST {
-                        distance_squared *= -BOUNCE_COEFF;
-                    }
-                    let their_mass = mass.get(index).unwrap();
-                    let norm = G * their_mass / distance_squared; // F/m
-                    res = add(res, normalize_difference(*my_position, *position, norm))
+
+        accel_far.foreach_threaded(N_THREADS, |i, _, _| {
+            let my_position = *position.get(i).unwrap();
+            let mut res = (0.0, 0.0, 0.0);
+
+            for voxel in voxels.iter() {
+                let voxel_distance_squared = distance_squared(my_position, voxel.position);
+                if voxel_distance_squared > PRECISION_RADIUS_SQUARED {
+                    let distance_squared = distance_squared(my_position, voxel.center_of_mass);
+                    let norm = G * voxel.total_mass / distance_squared; // F/m
+                    res = add(res, normalize_difference(my_position, voxel.position, norm));
                 }
+            }
+
+            res
+        });
+
+        for _ in 0..STEPS_PER_FRAME {
+            accel_close.foreach_threaded(N_THREADS, |i, _, _| {
+                let my_position = *position.get(i).unwrap();
+                let my_coords = voxel::get_coords(GRID_SCALE, my_position);
+                let mut res = (0.0, 0.0, 0.0);
+
+                // Old code:
+                // for (index, &position) in position.iter().enumerate() {
+                //     if index == i {
+                //         continue
+                //     }
+                //     let mut distance_squared = distance_squared(my_position, position);
+                //     if distance_squared < BOUNCE_DIST {
+                //         distance_squared *= -BOUNCE_COEFF;
+                //     }
+                //     let their_mass = mass.get(index).unwrap();
+                //     let norm = G * their_mass / distance_squared; // F/m
+                //     res = add(res, normalize_difference(my_position, position, norm))
+                // }
+
+                for voxel in voxels.iter() {
+                    if my_coords == voxel.coords || distance_squared(my_position, voxel.position) <= PRECISION_RADIUS_SQUARED {
+                        for &index in voxel.elements.iter() {
+                            let their_position = *position.get(index).unwrap();
+                            let mut distance_squared = distance_squared(my_position, their_position);
+                            if distance_squared < BOUNCE_DIST {
+                                distance_squared *= -BOUNCE_COEFF;
+                            }
+                            let their_mass = mass.get(index).unwrap();
+                            let norm = G * their_mass / distance_squared; // F/m
+                            res = add(res, normalize_difference(my_position, their_position, norm));
+                        }
+                    }
+                }
+
                 res
             });
-            speed.foreach(|i, prev, _| add(*prev, mul(*accel.get(i).unwrap(), DT)));
+
+            speed.foreach(|i, prev, _| add(*prev, mul(add(*accel_close.get(i).unwrap(), *accel_far.get(i).unwrap()), DT)));
             position.foreach(|i, prev, _| add(*prev, mul(*speed.get(i).unwrap(), DT)));
+            // voxels.update(&position, &speed, &mass);
         }
+
+        voxels.relocate(&position);
+        voxels.gc();
+        voxels.update(&position, &speed, &mass);
+        // println!("{:?}", start.elapsed());
 
         // Start drawing
         let mut pb = PathBuilder::new();
@@ -149,7 +213,7 @@ fn main() {
 
         // Update image
         window.update_with_buffer(dt.get_data(), WIDTH, HEIGHT).unwrap();
-        dt.write_png(format!("./out/{}.png", step));
+        dt.write_png(format!("./out/{}.png", step)).unwrap();
     }
 }
 
@@ -162,9 +226,13 @@ fn distance_squared(a: (Prec, Prec, Prec), b: (Prec, Prec, Prec)) -> Prec {
 }
 
 #[inline]
-fn normalize_difference(a: (Prec, Prec, Prec), b: (Prec, Prec, Prec), unit: Prec) -> (Prec, Prec, Prec) {
+fn normalize_difference(
+    a: (Prec, Prec, Prec),
+    b: (Prec, Prec, Prec),
+    unit: Prec,
+) -> (Prec, Prec, Prec) {
     if unit == 0.0 {
-        return (0.0, 0.0, 0.0)
+        return (0.0, 0.0, 0.0);
     }
 
     let dx = b.0 - a.0;
@@ -173,7 +241,7 @@ fn normalize_difference(a: (Prec, Prec, Prec), b: (Prec, Prec, Prec), unit: Prec
     let d2 = dx * dx + dy * dy + dz * dz;
 
     if d2 == 0.0 {
-        return (0.0, 0.0, 0.0)
+        return (0.0, 0.0, 0.0);
     }
 
     let d = unit / Prec::sqrt(d2);

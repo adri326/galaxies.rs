@@ -16,7 +16,7 @@ pub fn uniform(radius: Prec, number: usize) -> Table<(Prec, Prec, Prec)> {
             let z = range.sample(&mut rng);
 
             if x * x + y * y + z * z <= radius_squared {
-                break (x, y, z)
+                break (x, y, z);
             }
         });
     }

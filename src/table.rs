@@ -8,9 +8,7 @@ pub struct Table<T> {
 
 impl<T> Table<T> {
     pub fn new(array: Vec<T>) -> Self {
-        Self {
-            array
-        }
+        Self { array }
     }
 
     pub fn foreach(&mut self, f: impl Fn(usize, &T, &Vec<T>) -> T) {
@@ -30,21 +28,59 @@ impl<T> Table<T> {
     }
 }
 
+const GROUP_BY: usize = 50;
+
 impl<T: Send + Clone + Sync> Table<T> {
-    pub fn foreach_threaded(&mut self, n_threads: u32, f: impl (Fn(usize, &T, &Vec<T>) -> T) + Send + Copy) {
+    pub fn foreach_threaded(
+        &mut self,
+        n_threads: u32,
+        f: impl (Fn(usize, &T, &Vec<T>) -> T) + Send + Copy,
+    ) {
         let mut pool = Pool::new(n_threads);
 
-        let res = Mutex::new(vec![None; self.array.len()]);
+        let mut res = Vec::with_capacity(self.array.len());
+        for _ in 0..self.array.len() {
+            res.push(None);
+        }
+        let res = Mutex::new(res);
         pool.scoped(|scope| {
             let res = &res;
             let array = &self.array;
+            let mut next_pool = Vec::with_capacity(GROUP_BY);
             for (index, elem) in self.array.iter().enumerate() {
-                scope.execute(move || {
-                    let value = f(index, elem, array);
-                    *res.lock().unwrap().get_mut(index).unwrap() = Some(value);
-                });
+                next_pool.push((index, elem));
+                if index % GROUP_BY == GROUP_BY - 1 {
+                    scope.execute(move || {
+                        let mut results = Vec::new();
+                        for (index, elem) in next_pool {
+                            results.push((index, f(index, elem, array)));
+                        }
+                        if let Ok(ref mut guard) = res.lock() {
+                            for (i, r) in results {
+                                guard[i] = Some(r);
+                            }
+                        }
+                    });
+                    next_pool = Vec::with_capacity(GROUP_BY);
+                }
             }
+            scope.execute(move || {
+                let mut results = Vec::new();
+                for (index, elem) in next_pool {
+                    results.push((index, f(index, elem, array)));
+                }
+                if let Ok(ref mut guard) = res.lock() {
+                    for (i, r) in results {
+                        guard[i] = Some(r);
+                    }
+                }
+            });
         });
-        self.array = res.into_inner().unwrap().into_iter().map(|x| x.unwrap()).collect();
+        self.array = res
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.unwrap())
+            .collect();
     }
 }
