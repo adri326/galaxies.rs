@@ -2,6 +2,7 @@ extern crate minifb;
 extern crate rand;
 extern crate raqote;
 extern crate scoped_threadpool;
+extern crate noise;
 
 pub mod gen;
 pub mod table;
@@ -13,13 +14,14 @@ use voxel::VoxelGrid;
 use std::time::Instant;
 use std::sync::{mpsc, Mutex};
 use std::thread;
+use noise::{NoiseFn, Perlin};
 
 pub type Prec = f32;
 
-const N_ELEMS: usize = 20000;
+const N_ELEMS: usize = 250000;
 const N_THREADS: u32 = 15;
-const GRID_SCALE: Prec = 1000.0;
-const SUB_GRID_SCALE: Prec = 100.0;
+const GRID_SCALE: Prec = 2000.0;
+const SUB_GRID_SCALE: Prec = 150.0;
 const PRECISION_RADIUS: Prec = 100.0;
 const PRECISION_RADIUS_SQUARED: Prec = PRECISION_RADIUS * PRECISION_RADIUS;
 const SUB_GRID_RADIUS: Prec = 700.0;
@@ -33,7 +35,7 @@ const DISTANCE_EPSILON: Prec = 0.01;
 const STEPS_PER_FRAME: usize = 10;
 const ACCEL_MID_FREQ: usize = 3;
 
-const RADIUS: Prec = 5000.0;
+const RADIUS: Prec = 6000.0;
 const RANDOM_SPEED: Prec = 5.0;
 const BLACK_HOLE_MASS: Prec = 3000000.0;
 const GALAXY_WEIGHT_FACTOR: Prec = 1.1;
@@ -42,21 +44,37 @@ const Z_SCALE: Prec = 0.3;
 // const NORM_MULT: Prec = 0.001;
 const WIDTH: usize = 1920;
 const HEIGHT: usize = 1080;
-const SCALE: Prec = 5000.0;
+const SCALE: Prec = 6000.0;
 const MIN_X: Prec = -SCALE * WIDTH as Prec / HEIGHT as Prec;
 const MAX_X: Prec = SCALE * WIDTH as Prec / HEIGHT as Prec;
 const MIN_Y: Prec = -SCALE;
 const MAX_Y: Prec = SCALE;
 
 const OUTPUT_WINDOW: bool = true;
-const OUTPUT_FILE: bool = false;
+const OUTPUT_FILE: bool = true;
+
+const NOISE_POS_SCALE: f64 = 2000.0;
+const NOISE_POS_AMP: Prec = 1000.0;
+
+const NOISE_MASS_SCALE: f64 = 200.0;
+const NOISE_MASS_AMP: Prec = 2.0;
 
 fn main() {
     let (tx, rx) = mpsc::channel();
+    let perlin = Perlin::new();
     let mut position = gen::uniform(RADIUS, N_ELEMS);
-    position.foreach(|_, p, _| (p.0, p.1, p.2 * Z_SCALE));
+    position.foreach(|_, p, _| (
+        p.0 + NOISE_POS_AMP * perlin.get([p.0 as f64 / NOISE_POS_SCALE, p.1 as f64 / NOISE_POS_SCALE, p.2 as f64 / NOISE_POS_SCALE, 0.0]) as Prec,
+        p.1 + NOISE_POS_AMP * perlin.get([p.0 as f64 / NOISE_POS_SCALE, p.1 as f64 / NOISE_POS_SCALE, p.2 as f64 / NOISE_POS_SCALE, 2.0]) as Prec,
+        (p.2 + NOISE_POS_AMP * perlin.get([p.0 as f64 / NOISE_POS_SCALE, p.1 as f64 / NOISE_POS_SCALE, p.2 as f64 / NOISE_POS_SCALE, -2.0]) as Prec) * Z_SCALE
+    ));
 
     let mut mass = gen::scalar_uniform(0.5, 1.5, N_ELEMS);
+    mass.foreach(|i, m, _| {
+        let p = position.array[i];
+        m + NOISE_MASS_AMP * perlin.get([p.0 as f64 / NOISE_MASS_SCALE, p.1 as f64 / NOISE_MASS_SCALE, p.2 as f64 / NOISE_MASS_SCALE, 6.0]) as Prec
+    });
+
     let mut speed = gen::uniform(RANDOM_SPEED, N_ELEMS);
     speed.foreach(|i, s, _| {
         let p = position.get(i).unwrap();
@@ -309,7 +327,7 @@ fn main() {
             }
 
             for (swallowing, swallowed) in collisions.into_inner().unwrap() {
-                println!("{} and {} collided!", swallowing, swallowed);
+                // println!("{} and {} collided!", swallowing, swallowed);
                 let mass_a = mass.array[swallowing];
                 let mass_b = mass.array[swallowed];
                 let coeff_a = mass_a / (mass_a + mass_b);

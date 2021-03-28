@@ -42,7 +42,7 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
         pb.rect(0.0, 0.0, WIDTH as f32, HEIGHT as f32);
         dt.fill(
             &pb.finish(),
-            &Source::Solid(SolidSource::from_unpremultiplied_argb(0x50, 0x00, 0x00, 0x00)),
+            &Source::Solid(SolidSource::from_unpremultiplied_argb(0x40, 0x00, 0x00, 0x00)),
             &DrawOptions::new()
         );
 
@@ -80,7 +80,7 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
                 if n % 1000 == 0 {
                     dt.stroke(
                         &pb.finish(),
-                        &Source::Solid(SolidSource::from_unpremultiplied_argb(0x40, 0xff, 0xff, 0xff)),
+                        &Source::Solid(SolidSource::from_unpremultiplied_argb(0x20, 0xff, 0xff, 0xff)),
                         &StrokeStyle {
                             width: 1.0,
                             cap: LineCap::Square,
@@ -98,7 +98,7 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
 
         dt.stroke(
             &pb.finish(),
-            &Source::Solid(SolidSource::from_unpremultiplied_argb(0x40, 0xff, 0xff, 0xff)),
+            &Source::Solid(SolidSource::from_unpremultiplied_argb(0x20, 0xff, 0xff, 0xff)),
             &StrokeStyle {
                 width: 1.0,
                 cap: LineCap::Square,
