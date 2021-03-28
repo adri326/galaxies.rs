@@ -2,7 +2,7 @@ use super::*;
 use minifb::{MouseMode, Scale, ScaleMode, Window, WindowOptions};
 use raqote::*;
 
-pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec, Prec, Prec)>)>) {
+pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec, Prec, Prec)>, Vec<bool>)>) {
     let mut window = if OUTPUT_WINDOW {
         Some(Window::new(
             "Galaxy goes brr",
@@ -34,7 +34,7 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
     let mut step = 0;
 
     loop {
-        let (position, previous_position) = rx.recv().unwrap();
+        let (position, previous_position, present) = rx.recv().unwrap();
         step += 1;
         // Start drawing
         let mut pb = PathBuilder::new();
@@ -70,7 +70,8 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
             let prev_y = ((prev_delta_y * 0.333 + prev_delta_z * 0.666) - MIN_Y) / (MAX_Y - MIN_Y) * HEIGHT as Prec;
 
             if
-                x >= 0.0 && x < WIDTH as Prec && y >= 0.0 && y < HEIGHT as Prec
+                present[i]
+                && x >= 0.0 && x < WIDTH as Prec && y >= 0.0 && y < HEIGHT as Prec
                 && prev_x >= 0.0 && prev_x < WIDTH as Prec && prev_y >= 0.0 && prev_y < HEIGHT as Prec
             {
                 pb.move_to(Prec::round(prev_x) as f32, Prec::round(prev_y) as f32);
