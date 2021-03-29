@@ -111,9 +111,15 @@ impl VoxelGrid {
                 total_mass += m;
             }
 
-            voxel.center_of_mass = mul(position_sum, 1.0 / total_mass);
-            voxel.total_mass = total_mass;
-            voxel.average_speed = mul(speed_sum, 1.0 / total_mass);
+            if total_mass > 0.0 {
+                voxel.center_of_mass = mul(position_sum, 1.0 / total_mass);
+                voxel.total_mass = total_mass;
+                voxel.average_speed = mul(speed_sum, 1.0 / total_mass);
+            } else {
+                voxel.center_of_mass = voxel.position;
+                voxel.total_mass = total_mass;
+                voxel.average_speed = (0.0, 0.0, 0.0);
+            }
 
             for sub_voxel in &mut voxel.children {
                 let mut position_sum = (0.0, 0.0, 0.0);

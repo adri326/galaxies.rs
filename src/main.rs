@@ -15,10 +15,11 @@ use std::time::Instant;
 use std::sync::{mpsc, Mutex};
 use std::thread;
 use noise::{NoiseFn, Perlin};
+use rand::Rng;
 
 pub type Prec = f32;
 
-const N_ELEMS: usize = 250000;
+const N_ELEMS: usize = 100000;
 const N_THREADS: u32 = 15;
 const GRID_SCALE: Prec = 2000.0;
 const SUB_GRID_SCALE: Prec = 150.0;
@@ -28,14 +29,14 @@ const SUB_GRID_RADIUS: Prec = 700.0;
 const SUB_GRID_RADIUS_SQUARED: Prec = SUB_GRID_RADIUS * SUB_GRID_RADIUS;
 const G: Prec = 20.0;
 const DT: Prec = 0.01;
-const COLLISION_DIST: Prec = 100.0;
+const COLLISION_DIST: Prec = 200.0;
 const GONE_RADIUS: Prec = 2.0 * RADIUS;
 const DISTANCE_EPSILON: Prec = 0.01;
 
-const STEPS_PER_FRAME: usize = 10;
+const STEPS_PER_FRAME: usize = 9;
 const ACCEL_MID_FREQ: usize = 3;
 
-const RADIUS: Prec = 6000.0;
+const RADIUS: Prec = 7500.0;
 const RANDOM_SPEED: Prec = 5.0;
 const BLACK_HOLE_MASS: Prec = 3000000.0;
 const GALAXY_WEIGHT_FACTOR: Prec = 1.1;
@@ -59,6 +60,9 @@ const NOISE_POS_AMP: Prec = 1000.0;
 const NOISE_MASS_SCALE: f64 = 200.0;
 const NOISE_MASS_AMP: Prec = 2.0;
 
+const MASSIVE_STAR_RARITY: u32 = 100;
+const MASSIVE_STAR_MASS: Prec = 15.0;
+
 fn main() {
     let (tx, rx) = mpsc::channel();
     let perlin = Perlin::new();
@@ -71,7 +75,12 @@ fn main() {
 
     let mut mass = gen::scalar_uniform(0.5, 1.5, N_ELEMS);
     mass.foreach(|i, m, _| {
+        let mut rng = rand::thread_rng();
+        let mut m = *m;
         let p = position.array[i];
+        if rng.gen_ratio(1, MASSIVE_STAR_RARITY) {
+            m += MASSIVE_STAR_MASS;
+        }
         m + NOISE_MASS_AMP * perlin.get([p.0 as f64 / NOISE_MASS_SCALE, p.1 as f64 / NOISE_MASS_SCALE, p.2 as f64 / NOISE_MASS_SCALE, 6.0]) as Prec
     });
 
@@ -343,7 +352,7 @@ fn main() {
                 mass.array[swallowed] = 0.0;
             }
 
-            speed.foreach(|i, prev, _| {
+            speed.foreach_threaded(N_THREADS, |i, prev, _| {
                 if mass.array[i] == 0.0 {
                     return (0.0, 0.0, 0.0)
                 }
@@ -359,7 +368,10 @@ fn main() {
             position.foreach(|i, prev, _| {
                 let res = add(*prev, mul(speed.array[i], DT));
 
-                if res.0.abs() > 10000000000.0 {
+                if
+                    res.0.abs() > 10000000000.0
+                    || res.0.is_nan() || res.0.is_infinite()
+                {
                     panic!(
                         "{:?} {:?} {:?} {:?} {:?} {:?} {:?}",
                         prev,

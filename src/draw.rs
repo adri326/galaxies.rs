@@ -2,6 +2,9 @@ use super::*;
 use minifb::{MouseMode, Scale, ScaleMode, Window, WindowOptions};
 use raqote::*;
 
+const ALPHA_PARTICLE: u8 = 0x40;
+const ALPHA_BACKGROUND: u8 = 0x30;
+
 pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec, Prec, Prec)>, Vec<bool>)>) {
     let mut window = if OUTPUT_WINDOW {
         Some(Window::new(
@@ -42,7 +45,7 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
         pb.rect(0.0, 0.0, WIDTH as f32, HEIGHT as f32);
         dt.fill(
             &pb.finish(),
-            &Source::Solid(SolidSource::from_unpremultiplied_argb(0x40, 0x00, 0x00, 0x00)),
+            &Source::Solid(SolidSource::from_unpremultiplied_argb(ALPHA_BACKGROUND, 0x00, 0x00, 0x00)),
             &DrawOptions::new()
         );
 
@@ -80,7 +83,7 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
                 if n % 1000 == 0 {
                     dt.stroke(
                         &pb.finish(),
-                        &Source::Solid(SolidSource::from_unpremultiplied_argb(0x20, 0xff, 0xff, 0xff)),
+                        &Source::Solid(SolidSource::from_unpremultiplied_argb(ALPHA_PARTICLE, 0xff, 0xff, 0xff)),
                         &StrokeStyle {
                             width: 1.0,
                             cap: LineCap::Square,
@@ -98,9 +101,9 @@ pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec,
 
         dt.stroke(
             &pb.finish(),
-            &Source::Solid(SolidSource::from_unpremultiplied_argb(0x20, 0xff, 0xff, 0xff)),
+            &Source::Solid(SolidSource::from_unpremultiplied_argb(ALPHA_PARTICLE, 0xff, 0xff, 0xff)),
             &StrokeStyle {
-                width: 1.0,
+                width: 0.0,
                 cap: LineCap::Square,
                 join: LineJoin::Bevel,
                 miter_limit: 0.0,
