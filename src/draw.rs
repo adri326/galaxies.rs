@@ -2,8 +2,8 @@ use super::*;
 use minifb::{MouseMode, Scale, ScaleMode, Window, WindowOptions};
 use raqote::*;
 
-const ALPHA_PARTICLE: u8 = 0x40;
-const ALPHA_BACKGROUND: u8 = 0x30;
+const ALPHA_PARTICLE: u8 = 0x50;
+const ALPHA_BACKGROUND: u8 = 0x60;
 
 pub fn draw(rx: std::sync::mpsc::Receiver<(Table<(Prec, Prec, Prec)>, Vec<(Prec, Prec, Prec)>, Vec<bool>)>) {
     let mut window = if OUTPUT_WINDOW {

@@ -32,9 +32,11 @@ const DT: Prec = 0.01;
 const COLLISION_DIST: Prec = 200.0;
 const GONE_RADIUS: Prec = 2.0 * RADIUS;
 const DISTANCE_EPSILON: Prec = 0.01;
+const SMOOTHING_SQUARED: Prec = 100.0;
 
 const STEPS_PER_FRAME: usize = 9;
 const ACCEL_MID_FREQ: usize = 3;
+const RENDER_EVERY_N: usize = 2;
 
 const RADIUS: Prec = 7500.0;
 const RANDOM_SPEED: Prec = 5.0;
@@ -128,6 +130,11 @@ fn main() {
         step += 1;
         // Advance N step
 
+        // Half-step for the position before calculating the forces for the furthest stars
+        position.foreach(|i, prev, _| {
+            add(*prev, mul(speed.array[i], DT / 2.0))
+        });
+
         accel_far.foreach_threaded(N_THREADS, |i, _, _| {
             let my_position = position.array[i];
             let mut res = (0.0, 0.0, 0.0);
@@ -202,6 +209,13 @@ fn main() {
         });
 
         for n_step in 0..STEPS_PER_FRAME {
+            // Half-step for xₜ, except on the first loop, as this half-step was already done while calculating the forces for the furthest stars
+            if n_step > 0 {
+                position.foreach(|i, prev, _| {
+                    add(*prev, mul(speed.array[i], DT / 2.0))
+                });
+            }
+
             if n_step % ACCEL_MID_FREQ == 0 {
                 accel_mid.foreach_threaded(N_THREADS, |i, _, _| {
                     let my_position = position.array[i];
@@ -234,6 +248,7 @@ fn main() {
                     mul(res, G)
                 });
 
+                // TODO: move this up before the x-half step?
                 jerk_mid.foreach_threaded(N_THREADS, |i, _, _| {
                     let my_position = position.array[i];
                     let my_speed = speed.array[i];
@@ -306,7 +321,7 @@ fn main() {
                                 if my_coords == voxel.coords || distance_squared(my_position, voxel.position) <= PRECISION_RADIUS_SQUARED {
                                     for &index in voxel.elements.iter() {
                                         let their_position = position.array[index];
-                                        let mut distance_squared = distance_squared(my_position, their_position);
+                                        let mut distance_squared = distance_squared(my_position, their_position) + SMOOTHING_SQUARED;
                                         if mass.array[index] == 0.0 {
                                             continue
                                         }
@@ -365,36 +380,22 @@ fn main() {
 
                 add(*prev, mul(res, DT))
             });
+
             position.foreach(|i, prev, _| {
-                let res = add(*prev, mul(speed.array[i], DT));
-
-                if
-                    res.0.abs() > 10000000000.0
-                    || res.0.is_nan() || res.0.is_infinite()
-                {
-                    panic!(
-                        "{:?} {:?} {:?} {:?} {:?} {:?} {:?}",
-                        prev,
-                        speed.array[i],
-                        accel_close.array[i],
-                        accel_mid.array[i],
-                        jerk_mid.array[i],
-                        accel_far.array[i],
-                        jerk_far.array[i],
-                    );
-                }
-
-                res
+                add(*prev, mul(speed.array[i], DT / 2.0))
             });
-            // voxels.update(&position, &speed, &mass);
+
+            voxels.update(&position, &speed, &mass);
         }
 
         voxels.relocate(&position);
         voxels.gc();
         voxels.update(&position, &speed, &mass);
         println!("{:?}", start.elapsed());
-        tx.send((position.clone(), previous_position, mass.iter().map(|&x| x > 0.0).collect())).unwrap();
-        previous_position = position.array.clone();
+        if step % RENDER_EVERY_N == 0 {
+            tx.send((position.clone(), previous_position, mass.iter().map(|&x| x > 0.0).collect())).unwrap();
+            previous_position = position.array.clone();
+        }
     }
 }
 
