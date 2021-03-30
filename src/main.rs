@@ -32,7 +32,8 @@ const DT: Prec = 0.01;
 const COLLISION_DIST: Prec = 200.0;
 const GONE_RADIUS: Prec = 2.0 * RADIUS;
 const DISTANCE_EPSILON: Prec = 0.01;
-const SMOOTHING_SQUARED: Prec = 100.0;
+const SMOOTHING_SQUARED: Prec = 25.0;
+const MASS_THRESHOLD: Prec = 0.01;
 
 const STEPS_PER_FRAME: usize = 9;
 const ACCEL_MID_FREQ: usize = 3;
@@ -54,7 +55,7 @@ const MIN_Y: Prec = -SCALE;
 const MAX_Y: Prec = SCALE;
 
 const OUTPUT_WINDOW: bool = true;
-const OUTPUT_FILE: bool = true;
+const OUTPUT_FILE: bool = false;
 
 const NOISE_POS_SCALE: f64 = 2000.0;
 const NOISE_POS_AMP: Prec = 1000.0;
@@ -93,11 +94,15 @@ fn main() {
         let alpha = Prec::atan2(p.1 / n, p.0 / n);
         let distance = Prec::sqrt(distance_squared(*p, (0.0, 0.0, 0.0)));
         let distance_sqrt = Prec::sqrt(distance);
-        (
-            s.0 - Prec::sqrt(BLACK_HOLE_MASS * G + distance / RADIUS * N_ELEMS as Prec * GALAXY_WEIGHT_FACTOR) * Prec::sin(alpha) / distance_sqrt,
-            s.1 + Prec::sqrt(BLACK_HOLE_MASS * G + distance / RADIUS * N_ELEMS as Prec * GALAXY_WEIGHT_FACTOR) * Prec::cos(alpha) / distance_sqrt,
-            s.2,
-        )
+        if distance_sqrt < DISTANCE_EPSILON {
+            (s.0, s.1, s.2)
+        } else {
+            (
+                s.0 - Prec::sqrt(BLACK_HOLE_MASS * G + distance / RADIUS * N_ELEMS as Prec * GALAXY_WEIGHT_FACTOR) * Prec::sin(alpha) / distance_sqrt,
+                s.1 + Prec::sqrt(BLACK_HOLE_MASS * G + distance / RADIUS * N_ELEMS as Prec * GALAXY_WEIGHT_FACTOR) * Prec::cos(alpha) / distance_sqrt,
+                s.2,
+            )
+        }
     });
     let mut accel_close = gen::null(N_ELEMS);
     let mut accel_mid = gen::null(N_ELEMS);
@@ -139,13 +144,13 @@ fn main() {
             let my_position = position.array[i];
             let mut res = (0.0, 0.0, 0.0);
 
-            if mass.array[i] == 0.0 {
+            if mass.array[i] <= MASS_THRESHOLD {
                 return (0.0, 0.0, 0.0)
             }
 
             for voxel in voxels.iter() {
                 let voxel_distance_squared = distance_squared(my_position, voxel.position);
-                if voxel_distance_squared > SUB_GRID_RADIUS_SQUARED && voxel.total_mass > 0.0 {
+                if voxel_distance_squared > SUB_GRID_RADIUS_SQUARED && voxel.total_mass > MASS_THRESHOLD {
                     let distance_squared = distance_squared(my_position, voxel.center_of_mass);
                     let norm = voxel.total_mass / distance_squared; // F/m
                     if distance_squared < DISTANCE_EPSILON {
@@ -154,7 +159,7 @@ fn main() {
                     if norm.is_nan() || norm.is_infinite() {
                         panic!("{} {:?} {:?} {:?} {:?}", norm, voxel.total_mass, distance_squared, voxel.center_of_mass, my_position);
                     }
-                    res = add(res, normalize_difference(my_position, voxel.position, norm));
+                    res = add(res, normalize_difference(my_position, voxel.center_of_mass, norm));
                 }
             }
 
@@ -166,13 +171,13 @@ fn main() {
             let my_speed = speed.array[i];
             let mut res = (0.0, 0.0, 0.0);
 
-            if mass.array[i] == 0.0 {
+            if mass.array[i] <= MASS_THRESHOLD {
                 return (0.0, 0.0, 0.0)
             }
 
             for voxel in voxels.iter() {
                 let voxel_distance_squared = distance_squared(my_position, voxel.position);
-                if voxel_distance_squared > SUB_GRID_RADIUS_SQUARED && voxel.total_mass > 0.0 {
+                if voxel_distance_squared > SUB_GRID_RADIUS_SQUARED && voxel.total_mass > MASS_THRESHOLD {
                     let distance_squared = distance_squared(my_position, voxel.center_of_mass);
                     if distance_squared < DISTANCE_EPSILON {
                         continue
@@ -184,7 +189,7 @@ fn main() {
                     res = add(res, mul(speed_diff, 1.0 / distance_cubed));
 
                     let speed_pos = prod(speed_diff, pos_diff);
-                    res = add(res, normalize_difference(my_position, voxel.position, 3.0 * speed_pos / distance_squared / distance_squared));
+                    res = add(res, normalize_difference(my_position, voxel.center_of_mass, 3.0 * speed_pos / distance_squared / distance_squared));
 
                     if
                         res.0.is_nan() || res.0.is_infinite() || res.0.abs() > 1000000.0
@@ -222,7 +227,7 @@ fn main() {
                     let my_coords = voxel::get_coords(GRID_SCALE, my_position);
                     let mut res = (0.0, 0.0, 0.0);
 
-                    if mass.array[i] == 0.0 {
+                    if mass.array[i] <= MASS_THRESHOLD {
                         return (0.0, 0.0, 0.0)
                     }
 
@@ -230,7 +235,7 @@ fn main() {
                         if my_coords == voxel.coords || distance_squared(my_position, voxel.position) <= SUB_GRID_RADIUS_SQUARED {
                             let my_coords = voxel::get_coords(SUB_GRID_SCALE, my_position);
                             for voxel in voxel.children.iter() {
-                                if voxel.total_mass > 0.0 && distance_squared(my_position, voxel.position) > PRECISION_RADIUS_SQUARED && my_coords != voxel.coords {
+                                if voxel.total_mass > MASS_THRESHOLD && distance_squared(my_position, voxel.position) > PRECISION_RADIUS_SQUARED && my_coords != voxel.coords {
                                     let distance_squared = distance_squared(my_position, add(voxel.center_of_mass, mul(voxel.average_speed, DT * n_step as Prec)));
                                     if distance_squared < DISTANCE_EPSILON {
                                         continue
@@ -239,7 +244,7 @@ fn main() {
                                     if norm.is_nan() || norm.is_infinite() {
                                         panic!("{} {:?} {:?} {:?} {:?}", norm, voxel.total_mass, distance_squared, voxel.center_of_mass, my_position);
                                     }
-                                    res = add(res, normalize_difference(my_position, voxel.position, norm));
+                                    res = add(res, normalize_difference(my_position, voxel.center_of_mass, norm));
                                 }
                             }
                         }
@@ -255,7 +260,7 @@ fn main() {
                     let my_coords = voxel::get_coords(GRID_SCALE, my_position);
                     let mut res = (0.0, 0.0, 0.0);
 
-                    if mass.array[i] == 0.0 {
+                    if mass.array[i] <= MASS_THRESHOLD {
                         return (0.0, 0.0, 0.0)
                     }
 
@@ -275,7 +280,7 @@ fn main() {
                                     res = add(res, mul(speed_diff, 1.0 / distance_cubed));
 
                                     let speed_pos = prod(speed_diff, pos_diff);
-                                    res = add(res, normalize_difference(my_position, voxel.position, 3.0 * speed_pos / distance_squared / distance_squared));
+                                    res = add(res, normalize_difference(my_position, voxel.center_of_mass, 3.0 * speed_pos / distance_squared / distance_squared));
 
                                     if
                                         res.0.is_nan() || res.0.is_infinite()
@@ -308,9 +313,9 @@ fn main() {
                 accel_close.foreach_threaded(N_THREADS, |i, _, _| {
                     let my_position = position.array[i];
                     let my_coords = voxel::get_coords(GRID_SCALE, my_position);
-                    let mut res = (0.0, 0.0, 0.0);
+                    let mut res: (Prec, Prec, Prec) = (0.0, 0.0, 0.0);
 
-                    if mass.array[i] == 0.0 {
+                    if mass.array[i] < MASS_THRESHOLD {
                         return (0.0, 0.0, 0.0)
                     }
 
@@ -321,12 +326,15 @@ fn main() {
                                 if my_coords == voxel.coords || distance_squared(my_position, voxel.position) <= PRECISION_RADIUS_SQUARED {
                                     for &index in voxel.elements.iter() {
                                         let their_position = position.array[index];
-                                        let mut distance_squared = distance_squared(my_position, their_position) + SMOOTHING_SQUARED;
-                                        if mass.array[index] == 0.0 {
+
+                                        if mass.array[index] < MASS_THRESHOLD {
                                             continue
                                         }
+
+                                        let mut distance_squared = distance_squared(my_position, their_position) + SMOOTHING_SQUARED;
+
                                         if distance_squared < COLLISION_DIST * mass.array[i].max(mass.array[index]).sqrt() {
-                                            if mass.array[i] > mass.array[index] {
+                                            if mass.array[i] > mass.array[index] || mass.array[i] == mass.array[index] && i > index {
                                                 collisions.lock().unwrap().push((i, index));
                                             }
                                             return (0.0, 0.0, 0.0)
@@ -336,7 +344,7 @@ fn main() {
                                         }
                                         let their_mass = mass.array[index];
                                         let norm = G * their_mass / distance_squared; // F/m
-                                        if norm.is_nan() || norm.is_infinite() {
+                                        if norm.is_nan() || norm.is_infinite() || res.0.is_nan() {
                                             panic!("{} {:?} {:?} {:?} {:?}", norm, their_mass, distance_squared, their_position, my_position);
                                         }
                                         res = add(res, normalize_difference(my_position, their_position, norm));
@@ -354,6 +362,10 @@ fn main() {
                 // println!("{} and {} collided!", swallowing, swallowed);
                 let mass_a = mass.array[swallowing];
                 let mass_b = mass.array[swallowed];
+                if mass_a < MASS_THRESHOLD || mass_b < MASS_THRESHOLD {
+                    // Stars already swallowed, skip
+                    continue
+                }
                 let coeff_a = mass_a / (mass_a + mass_b);
                 let coeff_b = mass_b / (mass_a + mass_b);
                 accel_far.array[swallowing] = add(mul(accel_far.array[swallowing], coeff_a), mul(accel_far.array[swallowed], coeff_b));
@@ -368,7 +380,7 @@ fn main() {
             }
 
             speed.foreach_threaded(N_THREADS, |i, prev, _| {
-                if mass.array[i] == 0.0 {
+                if mass.array[i] <= MASS_THRESHOLD {
                     return (0.0, 0.0, 0.0)
                 }
 
@@ -378,6 +390,23 @@ fn main() {
                 res = add(res, accel_far.array[i]);
                 res = add(res, mul(jerk_far.array[i], n_step as Prec * DT));
 
+                if
+                    res.0.is_nan() || res.0.is_infinite()
+                    || res.1.is_nan() || res.1.is_infinite()
+                    || res.2.is_nan() || res.2.is_infinite()
+                {
+                    panic!(
+                        "{} {:?} {:?} {:?} {:?} {:?} {:?}",
+                        i,
+                        res,
+                        accel_close.array[i],
+                        accel_mid.array[i],
+                        jerk_mid.array[i],
+                        accel_far.array[i],
+                        jerk_far.array[i]
+                    );
+                }
+
                 add(*prev, mul(res, DT))
             });
 
@@ -386,6 +415,8 @@ fn main() {
             });
 
             voxels.update(&position, &speed, &mass);
+            // voxels.relocate(&position);
+            // voxels.gc();
         }
 
         voxels.relocate(&position);
