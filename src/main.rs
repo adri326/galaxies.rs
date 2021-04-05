@@ -19,17 +19,17 @@ use rand::Rng;
 
 pub type Prec = f32;
 
-const N_ELEMS: usize = 100000;
-const N_THREADS: u32 = 15;
+const N_ELEMS: usize = 1000000;
+const N_THREADS: u32 = 16;
 const GRID_SCALE: Prec = 2000.0;
 const SUB_GRID_SCALE: Prec = 150.0;
-const PRECISION_RADIUS: Prec = 100.0;
+const PRECISION_RADIUS: Prec = 150.0;
 const PRECISION_RADIUS_SQUARED: Prec = PRECISION_RADIUS * PRECISION_RADIUS;
 const SUB_GRID_RADIUS: Prec = 700.0;
 const SUB_GRID_RADIUS_SQUARED: Prec = SUB_GRID_RADIUS * SUB_GRID_RADIUS;
 const G: Prec = 20.0;
 const DT: Prec = 0.01;
-const COLLISION_DIST: Prec = 200.0;
+const COLLISION_DIST: Prec = 50.0;
 const GONE_RADIUS: Prec = 2.0 * RADIUS;
 const DISTANCE_EPSILON: Prec = 0.01;
 const SMOOTHING_SQUARED: Prec = 25.0;
@@ -55,15 +55,15 @@ const MIN_Y: Prec = -SCALE;
 const MAX_Y: Prec = SCALE;
 
 const OUTPUT_WINDOW: bool = true;
-const OUTPUT_FILE: bool = false;
+const OUTPUT_FILE: bool = true;
 
 const NOISE_POS_SCALE: f64 = 2000.0;
-const NOISE_POS_AMP: Prec = 1000.0;
+const NOISE_POS_AMP: Prec = 1200.0;
 
 const NOISE_MASS_SCALE: f64 = 200.0;
 const NOISE_MASS_AMP: Prec = 2.0;
 
-const MASSIVE_STAR_RARITY: u32 = 100;
+const MASSIVE_STAR_RARITY: u32 = 50;
 const MASSIVE_STAR_MASS: Prec = 15.0;
 
 fn main() {
@@ -132,6 +132,7 @@ fn main() {
 
     loop {
         let start = Instant::now();
+        let mut n_collisions = 0;
         step += 1;
         // Advance N step
 
@@ -331,7 +332,7 @@ fn main() {
                                             continue
                                         }
 
-                                        let mut distance_squared = distance_squared(my_position, their_position) + SMOOTHING_SQUARED;
+                                        let mut distance_squared = distance_squared(my_position, their_position);
 
                                         if distance_squared < COLLISION_DIST * mass.array[i].max(mass.array[index]).sqrt() {
                                             if mass.array[i] > mass.array[index] || mass.array[i] == mass.array[index] && i > index {
@@ -342,6 +343,7 @@ fn main() {
                                         if distance_squared < DISTANCE_EPSILON {
                                             continue
                                         }
+                                        distance_squared += SMOOTHING_SQUARED;
                                         let their_mass = mass.array[index];
                                         let norm = G * their_mass / distance_squared; // F/m
                                         if norm.is_nan() || norm.is_infinite() || res.0.is_nan() {
@@ -358,7 +360,10 @@ fn main() {
                 });
             }
 
-            for (swallowing, swallowed) in collisions.into_inner().unwrap() {
+            let collisions = collisions.into_inner().unwrap();
+            n_collisions += collisions.len();
+
+            for (swallowing, swallowed) in collisions {
                 // println!("{} and {} collided!", swallowing, swallowed);
                 let mass_a = mass.array[swallowing];
                 let mass_b = mass.array[swallowed];
@@ -419,14 +424,19 @@ fn main() {
             // voxels.gc();
         }
 
-        voxels.relocate(&position);
-        voxels.gc();
-        voxels.update(&position, &speed, &mass);
-        println!("{:?}", start.elapsed());
+        if n_collisions > 0 {
+            println!("Collisions: {}", n_collisions);
+        }
+
         if step % RENDER_EVERY_N == 0 {
             tx.send((position.clone(), previous_position, mass.iter().map(|&x| x > 0.0).collect())).unwrap();
             previous_position = position.array.clone();
         }
+
+        voxels.relocate(&position);
+        voxels.gc();
+        voxels.update(&position, &speed, &mass);
+        println!("Step {}: {:?}", step, start.elapsed());
     }
 }
 

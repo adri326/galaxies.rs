@@ -135,6 +135,10 @@ impl VoxelGrid {
                     total_mass += m;
                 }
 
+                // if position_sum.0.is_nan() {
+                //     panic!("{:?} {:?} {:?}", position_sum, speed_sum, total_mass);
+                // }
+
                 if total_mass > 0.0 {
                     sub_voxel.center_of_mass = mul(position_sum, 1.0 / total_mass);
                     sub_voxel.total_mass = total_mass;
